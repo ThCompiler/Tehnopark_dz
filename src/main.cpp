@@ -1,15 +1,22 @@
 #include "Process.h"
+#include <iostream>
 
 int main()
 {
     Process test("test.out");
 
-    test.write("Hello", 5);
+    if(test.write("Hello", 5) < 0)
+    {
+        std::cerr << "problem with write to procces\n";
+        return 0;
+    }
 
     char read[256];
-    test.read(read, 256);
-
-    test.write("Hello2", 5);
+    if(test.read(read, 256))
+    {
+        std::cerr << "problem with write to procces\n";
+        return 0;
+    }
 
     test.close();
     return 0;

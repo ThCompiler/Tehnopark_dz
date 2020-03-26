@@ -3,10 +3,6 @@
 
 #include <unistd.h>
 #include <string>
-#include <sys/wait.h>
-#include <sys/prctl.h>
-#include <sys/fcntl.h>
-#include <cstring>
 
 class Process
 {
@@ -16,11 +12,11 @@ public:
 
     ~Process();
 
-    size_t write(const void *data, size_t len);
+    ssize_t write(const void *data, size_t len);
 
     void writeExact(const void *data, size_t len);
 
-    size_t read(void *data, size_t len);
+    ssize_t read(void *data, size_t len);
 
     void readExact(void *data, size_t len);
 
@@ -33,8 +29,8 @@ public:
     void closeStreams();
 
 private:
-    int _from_process[2];
-    int _to_process[2];
+    int _from_process;
+    int _to_process;
 
     pid_t _child_pid;
 };

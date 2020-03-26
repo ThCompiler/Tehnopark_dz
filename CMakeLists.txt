@@ -3,5 +3,8 @@ project(Process)
 
 include_directories(include)
 
-add_executable(Process src/Process.cpp src/main.cpp)
+add_library(Process_lib STATIC src/Process.cpp)
 
+add_executable(Process src/main.cpp)
+
+target_link_libraries(Process PUBLIC Process_lib)

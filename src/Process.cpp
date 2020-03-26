@@ -1,49 +1,60 @@
 #include "Process.h"
+#include "Exception.h"
+#include <string>
+#include <sys/wait.h>
+#include <sys/prctl.h>
+#include <sys/fcntl.h>
+#include <cstring>
 
 Process::Process(const std::string &path)
 {
-    if (pipe(_from_process) == -1)
+    int from[2];
+    int to[2];
+
+    if (pipe(from) == -1)
     {
-        fprintf(stderr, "can't create pipe for reading from process: %s\n",
-                strerror(errno));
-        return;
+        throw CreateError("can't create pipe for reading from process: " +
+                          std::string(strerror(errno)));
     }
 
-    if (pipe(_to_process) == -1)
+    if (pipe(to) == -1)
     {
-        fprintf(stderr, "can't create pipe for writing to process: %s\n",
-                strerror(errno));
-        ::close(_from_process[0]);
-        ::close(_from_process[1]);
-        return;
+        ::close(from[0]);
+        ::close(from[1]);
+        throw CreateError("can't create pipe for reading from process: " +
+                          std::string(strerror(errno)));
     }
 
     _child_pid = fork();
     if (_child_pid == -1)
     {
-        fprintf(stderr, "can't create a new process: %s\n", strerror(errno));
-        closeStreams();
-        return;
+        ::close(to[0]);
+        ::close(to[1]);
+        ::close(from[0]);
+        ::close(from[1]);
+
+        throw CreateError(
+                "can't create a new process: " + std::string(strerror(errno)));
     }
 
-    if (!_child_pid)
+    if (_child_pid == 0)
     {
-        if (dup2(_to_process[0], STDIN_FILENO) == -1)
+        if (dup2(to[0], STDIN_FILENO) == -1)
         {
             fprintf(stderr, "can't set stdin of process: %s\n",
                     strerror(errno));
             exit(-1);
         }
 
-        if (dup2(_from_process[1], STDOUT_FILENO) == -1)
+        if (dup2(from[1], STDOUT_FILENO) == -1)
         {
             fprintf(stderr, "can't set stdout of process: %s\n",
                     strerror(errno));
             exit(-1);
         }
 
-        ::close(_to_process[1]);
-        ::close(_from_process[0]);
+        ::close(to[1]);
+        ::close(from[0]);
 
         prctl(PR_SET_PDEATHSIG, SIGTERM);
 
@@ -55,8 +66,11 @@ Process::Process(const std::string &path)
         }
     } else
     {
-        ::close(_to_process[0]);
-        ::close(_from_process[1]);
+        ::close(to[0]);
+        ::close(from[1]);
+
+        _to_process = to[1];
+        _from_process = from[0];
     }
 
 }
@@ -68,68 +82,40 @@ Process::~Process()
 
 void Process::closeStdin()
 {
-    if (_to_process[0] == -1)
+    if (_to_process == -1)
     {
         return;
     }
 
-    ::close(_to_process[0]);
-    ::close(_to_process[1]);
-    _to_process[0] = -1;
-    _to_process[1] = -1;
+    ::close(_to_process);
+    _to_process = -1;
 }
 
-size_t Process::write(const void *data, size_t len)
+ssize_t Process::write(const void *data, size_t len)
 {
-    if (_to_process[1] == -1)
-    {
-        perror("stdin of process close\n");
-        return -1;
-    }
-
-    size_t res = ::write(_to_process[1], data, len);
-
-    if (res < 0)
-    {
-        fprintf(stderr, "can't write to process: %s\n", strerror(errno));
-    }
-
-    return res;
+    return ::write(_to_process, data, len);
 }
 
 void Process::writeExact(const void *data, size_t len)
 {
-    if (_to_process[1] == -1)
-    {
-        perror("stdin of process close\n");
-        return;
-    }
-
     size_t res = 0;
     while (res != len)
     {
-        size_t len_write = ::write(_to_process[1], data, len - res);
+        size_t len_write = write(data, len - res);
 
         if (len_write < 0)
         {
-            fprintf(stderr, "can't write to process: %s\n", strerror(errno));
+            throw StreamError(
+                    "can't write to process: " + std::string(strerror(errno)));
         }
 
         res += len_write;
-        wait(NULL);
     }
 }
 
-size_t Process::read(void *data, size_t len)
+ssize_t Process::read(void *data, size_t len)
 {
-    size_t res = ::read(_from_process[0], data, len);
-
-    if (res < 0)
-    {
-        fprintf(stderr, "can't read from process: %s\n", strerror(errno));
-    }
-
-    return res;
+    return ::read(_from_process, data, len);
 }
 
 void Process::readExact(void *data, size_t len)
@@ -137,23 +123,22 @@ void Process::readExact(void *data, size_t len)
     size_t res = 0;
     while (res != len)
     {
-        size_t len_read = ::read(_from_process[0], data, len - res);
+        size_t len_read = read(data, len - res);
 
         if (len_read < 0)
         {
-            fprintf(stderr, "can't read from process: %s\n", strerror(errno));
-            return;
+            throw StreamError(
+                    "can't read from process: " + std::string(strerror(errno)));
         }
 
         res += len_read;
-        wait(NULL);
     }
 
 }
 
 bool Process::isReadable() const
 {
-    if (fcntl(_from_process[0], F_GETFL) < 0)
+    if (fcntl(_from_process, F_GETFL) < 0)
     {
         if (errno != EBADF)
         {
@@ -168,26 +153,22 @@ void Process::close()
 {
     closeStreams();
 
-    if (_child_pid)
+    if (_child_pid != 0)
     {
         int status = 0;
-        waitpid(_child_pid, &status, WNOHANG);
-
-        if (!WIFEXITED(status) && !WIFSIGNALED(status))
+        if (kill(_child_pid, SIGKILL) == -1)
         {
-            if (kill(_child_pid, SIGKILL) == -1)
-            {
-                fprintf(stderr, "Can't kill process: %s\n", strerror(errno));
-            }
+            fprintf(stderr, "Can't kill process: %s\n", strerror(errno));
         }
+
+        waitpid(_child_pid, &status, WNOHANG);
     }
     _child_pid = 0;
 }
 
 void Process::closeStreams()
 {
-    ::close(_to_process[0]);
-    ::close(_from_process[1]);
-    ::close(_to_process[1]);
-    ::close(_from_process[0]);
+    ::close(_from_process);
+    ::close(_to_process);
 }
+
