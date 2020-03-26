@@ -101,7 +101,7 @@ void Process::writeExact(const void *data, size_t len)
     size_t res = 0;
     while (res != len)
     {
-        size_t len_write = write(data, len - res);
+        size_t len_write = write(data + res, len - res);
 
         if (len_write < 0)
         {
@@ -123,7 +123,7 @@ void Process::readExact(void *data, size_t len)
     size_t res = 0;
     while (res != len)
     {
-        size_t len_read = read(data, len - res);
+        size_t len_read = read(data + res, len - res);
 
         if (len_read < 0)
         {
