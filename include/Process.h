@@ -32,6 +32,7 @@ private:
     int _from_process;
     int _to_process;
 
+    bool _enable_read;
     pid_t _child_pid;
 };
 

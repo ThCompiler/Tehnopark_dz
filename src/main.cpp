@@ -10,9 +10,9 @@ int main()
         std::cerr << "problem with write to procces\n";
         return 0;
     }
-
+    test.closeStdin();
     char read[256];
-    if(test.read(read, 256))
+    if(test.read(read, 1) < 0)
     {
         std::cerr << "problem with write to procces\n";
         return 0;

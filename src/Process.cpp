@@ -52,7 +52,8 @@ Process::Process(const std::string &path)
                     strerror(errno));
             exit(-1);
         }
-
+        ::close(to[0]);
+        ::close(from[1]);
         ::close(to[1]);
         ::close(from[0]);
 
@@ -72,7 +73,7 @@ Process::Process(const std::string &path)
         _to_process = to[1];
         _from_process = from[0];
     }
-
+    _enable_read = true;
 }
 
 Process::~Process()
@@ -93,7 +94,12 @@ void Process::closeStdin()
 
 ssize_t Process::write(const void *data, size_t len)
 {
-    return ::write(_to_process, data, len);
+    ssize_t res = ::write(_to_process, data, len);
+    if(res == 0)
+    {
+        _enable_read = false;
+    }
+    return res;
 }
 
 void Process::writeExact(const void *data, size_t len)
@@ -101,7 +107,7 @@ void Process::writeExact(const void *data, size_t len)
     size_t res = 0;
     while (res != len)
     {
-        size_t len_write = write(data, len - res);
+        size_t len_write = write((const char*)data + res, len - res);
 
         if (len_write < 0)
         {
@@ -123,7 +129,7 @@ void Process::readExact(void *data, size_t len)
     size_t res = 0;
     while (res != len)
     {
-        size_t len_read = read(data, len - res);
+        size_t len_read = read((char*)data + res, len - res);
 
         if (len_read < 0)
         {
@@ -138,15 +144,7 @@ void Process::readExact(void *data, size_t len)
 
 bool Process::isReadable() const
 {
-    if (fcntl(_from_process, F_GETFL) < 0)
-    {
-        if (errno != EBADF)
-        {
-            fprintf(stderr, "Error with stdin: %s\n", strerror(errno));
-        }
-        return false;
-    }
-    return true;
+    return _enable_read;
 }
 
 void Process::close()
